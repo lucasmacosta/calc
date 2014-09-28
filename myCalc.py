@@ -14,8 +14,9 @@ if __name__ == "__main__":
         	results = myParser.parse( s )
         	print s, "=", results['parseResult'], "=>", results['evaluation']
     	except Exception, err:
-    		print s, "=> parsing failed!!"
+    		print s, "=> parsing failed!!", err
   
+    test( "" )
     test( "9" )
     test( "-9" )
     test( "(3)" )
@@ -24,4 +25,6 @@ if __name__ == "__main__":
     test( "5.5 + 9 * -2" )
     test( "(5 + 9) * -2" )
     test( "5 * 3 * (8 - 23)" )
+    test( "(2 + 2) * log 10 / 3" )
     test( "--5" )
+    test( "5 / 0" )

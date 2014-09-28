@@ -1,4 +1,5 @@
 from pyparsing import Word, ParseException, Literal, Combine, Optional, nums, Forward, ZeroOrMore, StringStart, StringEnd
+from math import log10
 
 class Parser:
 
@@ -28,19 +29,33 @@ class Parser:
         multOp = mult | div
         logOp  = Literal( "log" )
 
-        # Now the actual grammar ;)
+        '''
         expr = Forward()
         atom = floatNumber.setParseAction( self.pushFirst ) | ( lPar + expr + rPar )
         term = atom + ZeroOrMore( (multOp + atom).setParseAction( self.pushFirst ) )
         expr << term + ZeroOrMore( (addOp + term).setParseAction( self.pushFirst ) )
 
-        self.bnf = expr
+        '''
+        # Now the actual grammar ;)
+        expr = Forward()
+        term = Forward()
+
+        atom = floatNumber.setParseAction( self.pushFirst ) | ( lPar + expr + rPar )
+        factor = (logOp + atom).setParseAction( self.pushFirst ) ^ atom
+        term << ( factor + ( multOp + term ).setParseAction( self.pushFirst ) ^ factor )
+        expr << ( term + ( addOp + expr ).setParseAction( self.pushFirst ) ^ term )
+
+        self.bnf = StringStart() + expr + StringEnd()
 
         self.ops = {
             "+" : lambda a, b: a + b,
             "-" : lambda a, b: a - b,
             "*" : lambda a, b: a * b,
             "/" : lambda a, b: a / b
+        }
+
+        self.funcs = {
+            "log" : lambda a: log10(a)
         }
 
 
@@ -54,15 +69,18 @@ class Parser:
             op2 = self.evaluate( )
             op1 = self.evaluate( )
             return self.ops[op]( op1, op2 )
+        elif op == "log":
+            op = self.evaluate( )
+            return self.funcs['log']( op )
         else:
             return float( op )
 
 
-    def parse( self, str ):
+    def parse( self, expr ):
         self.exprStack = []
         try:
-            result = self.bnf.parseString( str )
+            result = self.bnf.parseString( expr )
         except ParseException,err:
-            raise Exception, 'Parse Failure:' + str
+            raise Exception, 'Parse Failure: ' + str(err)
 
-        return { "parseResult": result, "stack": self.exprStack, "evaluation": self.evaluate( ) }
+        return { "parseResult": result, "evaluation": self.evaluate( ) }
