@@ -1,4 +1,4 @@
-from pyparsing import Word, ParseException, Literal, Combine, Optional, nums, Forward, ZeroOrMore, StringStart, StringEnd
+from pyparsing import Word, ParseException, Literal, Combine, Optional, nums, Forward, ZeroOrMore, StringStart, StringEnd, Group
 from math import log10
 
 class Parser:
@@ -29,21 +29,13 @@ class Parser:
         multOp = mult | div
         logOp  = Literal( "log" )
 
-        '''
-        expr = Forward()
-        atom = floatNumber.setParseAction( self.pushFirst ) | ( lPar + expr + rPar )
-        term = atom + ZeroOrMore( (multOp + atom).setParseAction( self.pushFirst ) )
-        expr << term + ZeroOrMore( (addOp + term).setParseAction( self.pushFirst ) )
-
-        '''
-        # Now the actual grammar ;)
         expr = Forward()
         term = Forward()
 
-        atom = floatNumber.setParseAction( self.pushFirst ) | ( lPar + expr + rPar )
-        factor = (logOp + atom).setParseAction( self.pushFirst ) ^ atom
-        term << ( factor + ( multOp + term ).setParseAction( self.pushFirst ) ^ factor )
-        expr << ( term + ( addOp + expr ).setParseAction( self.pushFirst ) ^ term )
+        atom = floatNumber | ( lPar + expr + rPar )
+        factor = Group(logOp + atom) | atom
+        term << ( Group(factor + multOp + term ) | factor )
+        expr << ( Group(term + addOp + expr ) | term )
 
         self.bnf = StringStart() + expr + StringEnd()
 
@@ -59,21 +51,23 @@ class Parser:
         }
 
 
-    def pushFirst( self, str, loc, toks ):
-        self.exprStack.append( toks[0] )
-
-
-    def evaluate( self ):
-        op = self.exprStack.pop()
-        if op in "+-*/":
-            op2 = self.evaluate( )
-            op1 = self.evaluate( )
-            return self.ops[op]( op1, op2 )
-        elif op == "log":
-            op = self.evaluate( )
-            return self.funcs['log']( op )
+    def evaluate( self, node ):
+        if isinstance(node, basestring):
+            if node in "+-*/":
+                return self.ops[node]
+            elif node in ["log"]:
+                return self.funcs[node]
+            else:
+                return float(node)
         else:
-            return float( op )
+            if len(node) == 3:
+                operator = self.evaluate(node[1]);
+                return operator(self.evaluate(node[0]), self.evaluate(node[2]))
+            elif len(node) == 2:
+                function = self.evaluate(node[0]);
+                return function(self.evaluate(node[1]))
+            else:
+                return self.evaluate(node[0])
 
 
     def parse( self, expr ):
@@ -83,4 +77,4 @@ class Parser:
         except ParseException,err:
             raise Exception, 'Parse Failure: ' + str(err)
 
-        return { "parseResult": result, "evaluation": self.evaluate( ) }
+        return { "parseResult": result, "evaluation": self.evaluate( result ) }
