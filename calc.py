@@ -67,7 +67,7 @@ def session_persistence(operation, session_id, session):
 		new_session = []
 		for expr in response['expressions']:
 			print '\t{0} = {1}'.format(expr['expr'], expr['result'])
-			new_session.append(expr)
+			new_session.append(expr['expr'])
 
 		# Session now has the retrieved expressions
 		return new_session
