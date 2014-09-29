@@ -1,106 +1,116 @@
-from flask import Flask, request, g, abort, json
-from parser import Parser
-from database import db_session, init_db
-from models import Session, Expression
-from sqlalchemy.orm.exc import NoResultFound
+import requests
+from requests.exceptions import ConnectionError
+import sys, getopt
+import re
 
-# Init flask app
-app = Flask(__name__)
-# Get config
-app.config.from_pyfile('config.py')
+server = 'http://127.0.0.1:5000'
 
 
-# Init db, it creates tables if not already on the database
-init_db()
+# Generic handler of http requests
+def request_handler(type, endpoint, params = {}):
+	try:
+		if (type == 'post'):
+			r = requests.post(endpoint, data=params)
+		elif (type == 'get'):
+			r = requests.get(endpoint, params=params)
+	except ConnectionError, err:
+		return False, "Connection error, make sure that calcServer.py is up and running"
+
+	response = r.json()
+	if r.status_code != requests.codes.ok:
+		return False, response['error']
+
+	return True, response
 
 
-# Callback to close db session on exit
-@app.teardown_appcontext
-def shutdown_session(exception=None):
-    db_session.remove()
+# Use server to calculate expressions
+def calculate_expression(expression):
+	global server
+	endpoint = server + '/calculate'
+
+	status, response = request_handler('get', endpoint, { 'expression': expression })
+
+	if (status == False):
+		print 'Error on calculation: ', response
+	else:
+		print response['result']
+
+	return status
 
 
-# Simple math expressions parser
-parser = Parser()
+# Handle persistence of sessions
+def session_persistence(operation, session_id, session):
+	global server
+	endpoint = '{0}/session/{1}'.format(server, session_id)
+
+	if operation == 'save':
+		status, response = request_handler('post', endpoint, { 'expression': '|'.join(session) })
+
+		if (status == False):
+			print 'Error while saving: ', response
+			return False
+
+		print 'Session {0} saved'.format(session_id)
+
+		# Session is now empty
+		return []
+
+	elif operation == 'retrieve':
+		status, response = request_handler('get', endpoint)
+
+		if (status == False):
+			print 'Error while retrieving: ', response
+			return False
+
+		print 'Session {0} retrieved'.format(session_id)
+
+		new_session = []
+		for expr in response['expressions']:
+			print '\t{0} = {1}'.format(expr['expr'], expr['result'])
+			new_session.append(expr)
+
+		# Session now has the retrieved expressions
+		return new_session
 
 
-# Utility to send json-encoded responses
-def jsonResponse( payload, statusCode ):
-    encodedStr = json.jsonify( payload )
-    return encodedStr, statusCode
+
+# Main program
+def main(argv):
+	global server
+	session_expressions = []
+	try:
+		opts, args = getopt.getopt(argv,"hs:",["server="])
+	except getopt.GetoptError:
+		print 'calc.py -s <server>'
+		sys.exit(2)
+	for opt, arg in opts:
+		if opt == '-h':
+			print 'calc.py -s <server>'
+			sys.exit()
+		elif opt in ("-s", "--server"):
+			server = arg
+	print 'Using server at ', server
+	print 'Simple calculator'
+	print 'Enter "exit" to finish'
+	print 'Enter "save <id>" to save a session'
+	print 'Enter "retrieve <id>" to retrieve a session'
+	print 'Enter a math expression to perform calculation'
+	while (True):
+		command = raw_input("$: ")
+		search = re.match(r'(save|retrieve) (\d+)', command)
+		if search:
+			# Perform operation
+			op_result = session_persistence(search.group(1), search.group(2), session_expressions)
+			if op_result != False:
+				# Update the session with the session result
+				session_expressions = op_result
+		else:
+			# Calculate expression
+			if calculate_expression(command):
+				# Only valid expressions are added to session
+				session_expressions.append(command)
 
 
-# Root
-@app.route('/')
-def default_route():
-    return jsonResponse( { "error": "Invalid endpoint!" }, 400 )
 
-
-# Route to perform a calculation
-# Returns 200 and the result if success, a 400 otherwise
-@app.route('/calculate', methods=['GET'])
-def calculate():
-    expression = request.args.get('expression', '')
-    global parser
-    try:
-        results = parser.parse( expression )
-    except Exception, err:
-        return jsonResponse({ "error": str(err) }, 400)
-
-    return jsonResponse( { "result": results['evaluation'] }, 200 )
-
-
-# Convert session to an object to return it in the REST interface
-def session_to_object(session_model):
-    session = {
-        'id': session_model.id,
-        'number': session_model.number,
-        'expressions': map( lambda expr: expr.expr_str, session_model.expressions )
-    }
-    return session
-
-# REST interface to store and retrieve calculation sessions
-
-@app.route('/session/<int:session_id>', methods=['POST'])
-def store_session(session_id):
-    # Get form data
-    expression = request.form.get('expression', '')
-
-    # Check if a new session is needed
-    try:
-        session = db_session.query(Session).filter(Session.number == session_id).one()
-    except NoResultFound, err:
-        session = Session(session_id)
-        db_session.add(session)
-
-    # Cleanup the associated expressions
-    session.expressions = []
-
-    # Add related expressions
-    for expr in expression.split('|'):
-        session.expressions.append(Expression(expr))
-
-    # Save and return
-    try:
-        db_session.commit()
-    except Exception, err:
-        return jsonResponse({ "error": str(err) }, 500)
-
-    # Success!
-    return jsonResponse(session_to_object( session ), 200)
-
-
-@app.route('/session/<int:session_id>', methods=['GET'])
-def get_session(session_id):
-    try:
-        session = db_session.query(Session).filter(Session.number == session_id).one()
-    except Exception, err:
-        return jsonResponse({ "error": str(err) }, 404)
-
-    # Success!
-    return jsonResponse(session_to_object( session ), 200)
-
-
-if __name__ == '__main__':
-    app.run()
- 
+if __name__ == "__main__":
+   main(sys.argv[1:])
